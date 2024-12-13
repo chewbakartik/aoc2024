@@ -9,22 +9,9 @@ pub fn part_one(input: &str) -> Option<u32> {
 }
 
 pub fn part_two(input: &str) -> Option<u32> {
-    //877 is too small
-    let input = "....#.....
-.........#
-..........
-..#.......
-.......#..
-..........
-.#..^.....
-........#.
-#.........
-......#...
-";
     let mut lab = Lab::from(input);
-    let visited = lab.walk().visited.len() as u32;
     let count = lab.sabatoge().diversions.len() as u32;
-    Some(6)
+    Some(count)
 }
 
 struct Lab {
@@ -32,19 +19,25 @@ struct Lab {
     guard: Guard,
     visited: HashSet<Position>,
     diversions: HashSet<Position>,
+    og: Guard,
 }
 
 impl Lab {
     fn walk(&mut self) -> &Self {
-        println!("Visited: {:?}\n", self.visited);
         loop {
-            let next = self.guard.position + self.guard.direction.offset();
+            let next = self.guard.position + self.guard.position.direction.offset();
 
-            println!("Next: {:?}\n", next);
-            self.visited.insert(self.guard.position);
+            // This takes a lot longer than using contains on the HashSet that doesn't track position direction,
+            // but we need to store unique row, col values for Part 1
+            // Part 2 requires us to also know the direction of the position, however it breaks if we treat the same x, y as different
+            // depending on the way the guard is facing.
+            let v = self.visited.iter().any(|pos| pos.row == self.guard.position.row && pos.col == self.guard.position.col);
+            if !v {
+                self.visited.insert(self.guard.position);
+            }
 
             match self.grid.get(next) {
-                Some(b'#') => self.guard.direction = self.guard.direction.turn(),
+                Some(b'#') => self.guard.position.direction = self.guard.position.direction.turn(),
                 Some(_) => self.guard.position = next,
                 None => break,
             }
@@ -53,21 +46,37 @@ impl Lab {
     }
 
     fn sabatoge(&mut self) -> &Self {
-        loop {
-            let next = self.guard.position + self.guard.direction.offset();
-            let turned_pos = self.guard.get_turned_pos();
-
-            if self.visited.contains(&turned_pos) {
-                self.diversions.insert(next);
-            }
-
-            match self.grid.get(next) {
-                Some(b'#') => self.guard.direction = self.guard.direction.turn(),
-                Some(_) => self.guard.position = next,
-                None => break,
+        // Get the conditions right.
+        self.walk();
+        for (i, pos) in self.visited.iter().enumerate() {
+            // reset guard to starting point
+            let guard = self.og.clone();
+            let mut grid = self.grid.clone();
+            // change grid to add obstacle
+            grid.set(*pos, b'#');
+            if self.check_diversion(grid, guard) {
+                self.diversions.insert(*pos);
             }
         }
         self
+    }
+
+    fn check_diversion(&self, grid: Grid, mut guard: Guard) -> bool {
+        let mut visited: HashSet<Position> = HashSet::new();
+        let mut i = 0;
+        loop {
+            let next = guard.position + guard.position.direction.offset();
+            if visited.contains(&guard.position) {
+                return true;
+            }
+            visited.insert(guard.position);
+            match grid.get(next) {
+                Some(b'#') => guard.position.direction = guard.position.direction.turn(),
+                Some(_) => guard.position = next,
+                None => return false
+            }
+            i += 1;
+        }
     }
 }
 
@@ -75,14 +84,15 @@ impl From<&str> for Lab {
     fn from(input: &str) -> Self {
         let grid = Grid::from(input);
         let guard = Guard {
-            direction: Direction::Up,
             position: grid.find_character(b'^', Direction::Up),
         };
+        let og = guard.clone();
         // Self { grid, guard, routes }
-        Self { grid, guard, visited: HashSet::new(), diversions: HashSet::new() }
+        Self { grid, guard, visited: HashSet::new(), diversions: HashSet::new(), og }
     }
 }
 
+#[derive(Clone, Debug)]
 struct Grid {
     bytes: Vec<Vec<u8>>,
 }
@@ -93,6 +103,15 @@ impl Grid {
             .get(position.row as usize)?.get(position.col as usize).copied()
     }
 
+    fn set(&mut self, position: Position, byte: u8) -> Self {
+        if let Some(row) = self.bytes.get_mut(position.row as usize) {
+            if let Some(cell) = row.get_mut(position.col as usize) {
+                *cell = byte;
+            }
+        }
+        self.clone()
+    }
+
     fn find_character(&self, target: u8, direction: Direction) -> Position {
         self.bytes.iter().enumerate().find_map(|(row_index, row)| {
             row.iter()
@@ -100,6 +119,15 @@ impl Grid {
                 .map(|col_index| Position::new(col_index as i32, row_index as i32, direction))
             })
             .unwrap_or_default()
+    }
+
+    fn show(&self) {
+        for row in &self.bytes {
+            let line: String = row.iter()
+                .map(|&byte| char::from(byte))
+                .collect();
+            println!("{}", line);
+        }
     }
 }
 
@@ -112,17 +140,7 @@ impl From<&str> for Grid {
 
 #[derive(Clone)]
 struct Guard {
-    direction: Direction,
     position: Position,
-}
-
-impl Guard {
-    fn get_turned_pos(&self) -> Position {
-        let next_direction = self.direction.turn();
-        let (col, row) = (self.position.col, self.position.row);
-        let position = Position::new(col, row, next_direction);
-        position
-    }
 }
 
 #[derive(Copy, Clone, Eq, Hash, PartialEq, Debug)]
